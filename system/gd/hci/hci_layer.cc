@@ -240,16 +240,22 @@ struct HciLayer::impl {
     }
     bool is_status = logging_id == "status";
 
-    log::assert_that(!command_queue_.empty(), "Unexpected {} event with OpCode {}", logging_id,
-                     OpCodeText(op_code));
+    if (command_queue_.empty()) {
+      log::warn("Discarding unexpected {} event with OpCode {} (no pending commands)", logging_id,
+                OpCodeText(op_code));
+      return;
+    }
     if (waiting_command_ == OpCode::CONTROLLER_DEBUG_INFO &&
         op_code != OpCode::CONTROLLER_DEBUG_INFO) {
       log::error("Discarding event that came after timeout {}", OpCodeText(op_code));
       common::StopWatch::DumpStopWatchLog();
       return;
     }
-    log::assert_that(waiting_command_ == op_code, "Waiting for {}, got {}",
-                     OpCodeText(waiting_command_), OpCodeText(op_code));
+    if (waiting_command_ != op_code) {
+      log::warn("Discarding {} event: waiting for {}, got {}", logging_id,
+                OpCodeText(waiting_command_), OpCodeText(op_code));
+      return;
+    }
 
     bool is_vendor_specific = (static_cast<int>(op_code) & (0x3f << 10)) == (0x3f << 10);
     using WaitingFor = CommandQueueEntry::WaitingFor;
@@ -464,19 +470,25 @@ struct HciLayer::impl {
         auto view = CommandCompleteView::Create(event);
         log::assert_that(view.IsValid(), "assert failed: view.IsValid()");
         auto op_code = view.GetCommandOpCode();
-        log::assert_that(op_code == OpCode::NONE,
-                         "Received {} event with OpCode {} without a waiting command(is the HAL "
-                         "sending commands, but not handling the events?)",
-                         EventCodeText(event_code), OpCodeText(op_code));
+        if (op_code != OpCode::NONE) {
+          log::warn(
+              "Discarding unexpected {} event with OpCode {} without a waiting command"
+              "(is the HAL sending commands, but not handling the events?)",
+              EventCodeText(event_code), OpCodeText(op_code));
+          return;
+        }
       }
       if (event_code == EventCode::COMMAND_STATUS) {
         auto view = CommandStatusView::Create(event);
         log::assert_that(view.IsValid(), "assert failed: view.IsValid()");
         auto op_code = view.GetCommandOpCode();
-        log::assert_that(op_code == OpCode::NONE,
-                         "Received {} event with OpCode {} without a waiting command(is the HAL "
-                         "sending commands, but not handling the events?)",
-                         EventCodeText(event_code), OpCodeText(op_code));
+        if (op_code != OpCode::NONE) {
+          log::warn(
+              "Discarding unexpected {} event with OpCode {} without a waiting command"
+              "(is the HAL sending commands, but not handling the events?)",
+              EventCodeText(event_code), OpCodeText(op_code));
+          return;
+        }
       }
       std::unique_ptr<CommandView> no_waiting_command{nullptr};
       log_hci_event(no_waiting_command, event, storage_);
